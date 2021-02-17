@@ -1,0 +1,208 @@
+# ************************************************************
+# * Author:
+# * Major: 
+# * Creation Date:              January 30, 2021
+# * Due Date:                   February 19, 2021
+# * Course:
+# * Professor Name:
+# * Assignment: 
+# * Filename: 
+# * Simulate a game of multiple-player tag to learn the state machine
+# * modeling architecture (STM). 
+# ************************************************************
+
+# STUDENT 1 (5%) Complete the documentation comment block above.
+# In each STUDENT-supplied requirement below, one line of comment
+# preceding the STUDENT code is already in place. Comments in the STM language
+# must not mix with code in the same line.
+##### !!! STUDENT: See upper case STUDENT comments for your work.
+
+machine processor {
+    # STUDENT: Do not change the processor state machine.
+    # Use this machine in in assignment 1 to start thread
+    # state machines, in which each one is a multi-threaded process.
+    # Any field in object processor is visible to all thread state machines.
+    # Such fields simulate kernel data in physical memory in the machine.
+    # Use the @@ delimiters around non-numeric Python data types.
+    # Using @@ passes the source code directly to Python.
+    # Use matching "double quotes" to delimit strings.
+    # Use "and" or "or" instead of "&&" or "||" in boolean guard expressions.
+    # SEE STM LIBRARY DOCUMENTATION IN STM.doc.txt.
+    processesToGo = 1, tid = -1, pid = -1;
+    start init, state makingProcesses, accept processorDone ;
+    init -> makingProcesses init()[]/@
+        # If there were fields in processor object they would go here.
+        # E.G.: processor.processorSampling = ["defect", "cooperate"];
+        # There are none in this assignment.
+        # Start process 0, thread 0, then continue:
+        processesToGo -= 1 ; fork()@
+    makingProcesses -> makingProcesses fork(pid, tid)[@processesToGo > 0@]/@
+        processesToGo -= 1 ; fork()@
+    makingProcesses -> processorDone fork(pid, tid)[@processesToGo == 0@]/
+}
+
+# STUDENT work goes into machine thread according to the handout.
+# Add documentation comments for the code that you write!!!
+# STUDENT: All transitions that you write per instructions below
+# **MUST** have cpu(1) as their final statement unless otherwise
+# specified in STUDENT comments for that transition. The subsequent cpu()
+# event is what triggers a transition out of the destination state.
+machine thread {
+    # You must declare variables here or on transition init ->
+    # You may need to create additional variables.
+    # Each player is a thread in this process. Thread 0 and thread 1 spawning
+    # are built into this application; 2 are minimum for a competition.
+    numberOfPlayers = 5, playersSpawned = 2,
+    # How many times was I tagged. tryHere is where to hide or to seek.
+    # STUDENT 2 (5%) create variables timesIwasTagged and tryHere,
+    # both initialized to 0.
+    
+    # Total tags in game and some loop control variables.
+    maxNumberOftags = 100, place = -1, i = -1, th = -1,
+    machineID = -1, pid = -1, tid = -1,
+    # areAllPlayersRunning -- function that evals to True when all are running.
+    areAllPlayersRunning = @(lambda playerList :
+        functools.reduce(lambda a, b : a and b , playerList))@,
+    # makehidingPlaces is a function that makes 5 X numplayers hiding places
+    makehidingPlaces = @(lambda numplayers :
+        [thing + str(index)
+            for thing in ['bush', 'tree', 'shrub', 'rock', 'blackhole']
+                for index in range(0, numplayers)])@,
+    # onePlaceIsVacated evals to True if a checked hiding place is vacant.
+    onePlaceIsVacated = @(lambda placeMapValue : placeMapValue == None)@,
+    # areAllPlacesVacated evals to True if a all hiding places are vacant.
+    areAllPlacesVacated = @(lambda placeMap :
+        functools.reduce(lambda a, b : a and b,
+            map(onePlaceIsVacated, placeMap.values())))@;
+    # See project documentation for state diagram. See also 
+    # https://kuvapcsitrd01.kutztown.edu/~parson/hideAndSeek2021.jpg
+    # STUDENT 3 (5%) Add missing state declarations that appear in the
+    # handout's state machine diagram.
+    start init, state initThread, state loopAndSpawn,
+
+        state IamSeeking, state IamHiding, accept endGame ;
+    # Macro to empty hiding places for the next round of hide & seek.
+    macro emptyAllHidingPlaces @
+        for place in pcb.whoIsHidingHere.keys():
+            pcb.whoIsHidingHere[place] = None;
+        @
+    # All threads of execution start in state init.
+    init -> initThread init()[]/@
+        machineID, pid, tid = getid();
+        msg("Example DEBUG message, pid = " + str(pid) + " tid = " + str(tid));
+        cpu(1)@
+    # STUDENT: cpu(1) initiates simulated cpu time of 1 virtual tick.
+    # When that is done, a cpu() event arrives per the next line.
+    initThread -> loopAndSpawn cpu()[@tid == 0@]/@
+        # We are using thread 0 to initialize pcb and start other threads,
+        # where each thread is a play.
+        # pcb is the Process Control Block (PCB) object. A PCB holds data
+        # shared by all threads in a process. It emulates a process' memory.
+        # None is Python's NULL pointer. [] is an empty list.
+        # pcb.players list holds pointers to [numberOfPlayers] threads.
+        # Like an array, it has indices [0..numberOfPlayers-1]
+        pcb.players = [None for i in range(0, numberOfPlayers)];
+        # thread is a pointer to this active thread object
+        pcb.players[tid] = thread ;
+        # pcb.playersReadyOrNot blocks the seeking thread until others hide.
+        pcb.playersReadyOrNot = 0 ;
+        # (5 X numberOfPlayers) hidingPlaces, 'bush0' through 'blackhole(N-1)'
+        pcb.hidingPlaces = makehidingPlaces(numberOfPlayers);
+        # Initially no one is behind hidingPlaces. map place -> tid
+        pcb.whoIsHidingHere = {};
+        # STM notation allows loop or "if" with a single statement only.
+        for place in pcb.hidingPlaces: pcb.whoIsHidingHere[place] = None;
+        # pcb.whoIsIt is thread ID (tid) of the seeking "IT" player.
+        # After the first "IT", the remainder become "IT" by being tagged.
+        # sample(lower, upper, ...) returns random from lower, upper inclusive.
+        pcb.whoIsIt = sample(0, numberOfPlayers-1, 'uniform');
+        # pcb.totalTags is the total number of times all have been tagged.
+        pcb.totalTags = 0 ;
+        # Start remaining threads after shared data in pcb is initialized.
+        # Starts tid=1 (2nd thread) and generates a spawn() event when done.
+        spawn()@
+    # STUDENT 4 (10%): Create a transition FROM loopAndSpawn TO loopAndSpawn
+    # that triggers on an incoming spawn-completion event,
+    # with a guard condition of playersSpawned being less than numberOfPlayers.
+    # The actions are to increment playersSpawned and then spawn another
+    # thread as the final action. See the diagram in the handout.
+    # Also see my next transition loopAndSpawn -> waitForOthersToStart below.
+    # YOUR TRANSITION GOES RIGHT HERE:
+    
+    loopAndSpawn -> waitForOthersToStart spawn()[@
+            playersSpawned == numberOfPlayers@]/@
+        cpu(1)@
+    # Spawned tid >= 1 go to waitForOthersToStart AFTER tid=0 initializes pcb.
+    initThread -> waitForOthersToStart cpu()[@tid > 0@]/@
+        pcb.players[tid] = thread ;
+        cpu(1)@
+    # All threads loop here until all are running, then start the game.
+    waitForOthersToStart -> waitForOthersToStart cpu()[@
+            not areAllPlayersRunning(pcb.players)@]/@
+        cpu(1)@
+    # Go to state seeWhoIsIt to start the next round of hide & seek.
+    # STUDENT 5 (15%): Create a transition FROM waitForOthersToStart TO
+    # seeWhoIsIt when all players are running. The only action is cpu(1).
+    # See my transition waitForOthersToStart -> waitForOthersToStart above.
+    # YOUR TRANSITION GOES RIGHT HERE:
+    
+    # STUDENT: Do not modify this transition. It ends game on maxNumberOftags.
+    seeWhoIsIt -> endGame cpu()[@pcb.totalTags == maxNumberOftags@]/@
+        msg(str(tid) + " Thread TAGGED " + str(timesIwasTagged)
+            + " out of " + str(pcb.totalTags))@
+    # The player who is "IT" loops until every other player is hidden.
+    # STUDENT 6 (15%): Create transition FROM seeWhoIsIt TO seeWhoIsIt
+    # when I am "IT" (the seeker) and the number of players who are
+    # "ready or not" is less than the remaining players. The only
+    # action is cpu(numberOfPlayers*2), which gives the other players time
+    # to hide. 
+    # See my transition seeWhoIsIt -> IamSeeking below.
+    # YOUR TRANSITION GOES RIGHT HERE:
+    
+    # The player who is "IT" is now ready to seek & tag another player.
+    seeWhoIsIt -> IamSeeking cpu()[@pcb.whoIsIt == tid
+            and pcb.playersReadyOrNot == (numberOfPlayers-1)@]/@
+        timesIwasTagged += 1 ;
+        pcb.totalTags += 1 ;
+        tryHere = (sample(0, len(pcb.hidingPlaces)-1, 'uniform')
+            + tid) % len(pcb.hidingPlaces);
+        cpu(1)@
+    # Players who are not "IT" look until they find an unused spot to hide in.
+    seeWhoIsIt -> IamHiding cpu()[@pcb.whoIsIt != tid@]/@
+        # Doing the add of tid helps to scatter players. sample() was
+        # returning poorly scattered locations, so the same players kept getting
+        # tagged. "% len(pcb.hidingPlaces)" keeps search within pcb.hidingPlaces
+        tryHere = (sample(0, len(pcb.hidingPlaces)-1, 'uniform')
+            + tid) % len(pcb.hidingPlaces);
+        while pcb.whoIsHidingHere[pcb.hidingPlaces[tryHere]] != None:
+            tryHere = (sample(0, len(pcb.hidingPlaces)-1, 'uniform')
+                + tid) % len(pcb.hidingPlaces);
+        pcb.whoIsHidingHere[pcb.hidingPlaces[tryHere]] = tid ;
+        pcb.playersReadyOrNot += 1 ;
+        waitForEvent("SomeoneWasTagged")@
+    # I looked behind a hiding place with no hider, try again.
+    # STUDENT 7 (15%): Create transition FROM IamSeeking TO IamSeeking
+    # when the place I am looking via tryHere does not have a hider --
+    # i.e., it has a value of None. See the guard condition on my
+    # IamSeeking -> seeWhoIsIt below. There are two actions on this transition:
+    # 1) Compute a new "tryHere" value via a sample() call identical to
+    # those above, and then 2) cpu(1) for the final action.
+    # YOUR TRANSITION GOES RIGHT HERE:
+    
+    # I looked behind a hiding place with a hider, tag that player and
+    # tell all players to go onto the next round.
+    IamSeeking -> seeWhoIsIt cpu()[@
+            pcb.whoIsHidingHere[pcb.hidingPlaces[tryHere]] != None@]/@
+        pcb.whoIsIt = pcb.whoIsHidingHere[pcb.hidingPlaces[tryHere]];
+        emptyAllHidingPlaces;
+        pcb.playersReadyOrNot = 0 ;
+        for th in pcb.players: signalEvent(th, "SomeoneWasTagged")
+            # Do not notify myself (thread).
+            if (not th is thread) else noop();
+        cpu(1)@
+    # Someone was tagged, start next round of play.
+    IamHiding -> seeWhoIsIt SomeoneWasTagged()[]/@
+        cpu(1)@
+}
+
+processor
